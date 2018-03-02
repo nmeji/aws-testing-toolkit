@@ -14,9 +14,9 @@ type TestData struct {
 }
 
 func (d *TestData) AssignValues(model interface{}) (string, error) {
-	t := template.Must(template.New("payload").Parse(d.Payload))
+	t := template.Must(template.New("payload").Parse(string(d.Payload)))
 	var payload bytes.Buffer
-	if err := t.Execute(payload, model); err != nil {
+	if err := t.Execute(&payload, model); err != nil {
 		return "", err
 	}
 	return payload.String(), nil

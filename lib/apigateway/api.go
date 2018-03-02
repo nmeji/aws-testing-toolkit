@@ -1,6 +1,8 @@
 package apigateway
 
 import (
+	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
@@ -9,17 +11,19 @@ import (
 	"github.com/google/jsonapi"
 )
 
-type Response *http.Response
+type Response struct {
+	Data       []byte
+	StatusCode int
+}
 
 func (resp *Response) ParseJsonApi(model interface{}) error {
-	return jsonapi.UnmarshalPayload(resp.Body, model)
+	return jsonapi.UnmarshalPayload(bytes.NewReader(resp.Data), model)
 }
 
 func (resp *Response) ParseJsonObject() map[string]interface{} {
-	jsonObj := make(map[string]interface{})
-	data, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(data, jsonObj)
-	return jsonObj
+	var jsonObj interface{}
+	json.Unmarshal(resp.Data, &jsonObj)
+	return jsonObj.(map[string]interface{})
 }
 
 type PreparedRequest struct {
@@ -28,27 +32,34 @@ type PreparedRequest struct {
 	targetURL string
 }
 
-func (p *PreparedRequest) sendRequest(method string) (Response, error) {
-	req, err := http.NewRequest(method, p.targetURL, strings.NewReader(p.body))
-	if err != nil {
-		return nil, err
-	}
+func (p *PreparedRequest) sendRequest(method string) (*Response, error) {
+	req, _ := http.NewRequest(method, p.targetURL, strings.NewReader(p.body))
 	for k, v := range p.headers {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
-	return Response(resp), err
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, _ := ioutil.ReadAll(resp.Body)
+	return &Response{data, resp.StatusCode}, err
 }
 
-func (p *PreparedRequest) Post(url string) (Response, error) {
+func (p *PreparedRequest) Post(url string) (*Response, error) {
+	p.targetURL = url
 	return p.sendRequest(http.MethodPost)
 }
 
-func (p *PreparedRequest) Get(url string) (Response, error) {
+func (p *PreparedRequest) Get(url string) (*Response, error) {
+	p.targetURL = url
 	return p.sendRequest(http.MethodGet)
 }
 
 func Prepare(body string, headers map[string]string) *PreparedRequest {
-	return &PreparedRequest{body, headers}
+	return &PreparedRequest{body, headers, ""}
 }
